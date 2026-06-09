@@ -1,0 +1,70 @@
+{
+  "name": "03 - Product Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "product-intake",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-product",
+      "name": "Webhook Product",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [190, 260],
+      "webhookId": "product-intake"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body ?? $json;\nreturn [{ json: {\n  store_id: body.store_id,\n  sku: body.sku ?? null,\n  name: body.name,\n  description: body.description ?? null,\n  color_name: body.color_name ?? null,\n  color_hex: body.color_hex ?? null,\n  dominant_season: body.dominant_season ?? [],\n  undertone_match: body.undertone_match ?? [],\n  style_tags: body.style_tags ?? [],\n  fabric: body.fabric ?? null,\n  occasion_tags: body.occasion_tags ?? [],\n  price: body.price ?? 0,\n  stock: body.stock ?? 0,\n  image_url: body.image_url ?? null,\n  active: body.active ?? true\n}}];"
+      },
+      "id": "normalize-product",
+      "name": "Normalize Product",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [430, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/products?on_conflict=store_id,sku",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "Prefer", "value": "resolution=merge-duplicates,return=representation"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}"
+      },
+      "id": "upsert-product",
+      "name": "Upsert Product",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [690, 260]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, product: (Array.isArray($json) ? $json[0] : $json) } }}"
+      },
+      "id": "product-response",
+      "name": "Product Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [940, 260]
+    }
+  ],
+  "connections": {
+    "Webhook Product": {"main": [[{"node": "Normalize Product", "type": "main", "index": 0}]]},
+    "Normalize Product": {"main": [[{"node": "Upsert Product", "type": "main", "index": 0}]]},
+    "Upsert Product": {"main": [[{"node": "Product Response", "type": "main", "index": 0}]]}
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1"
+}

@@ -1,0 +1,10 @@
+server {
+    listen 80;
+    server_name app.seudominio.com;
+    root /var/www/color-sales-app;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

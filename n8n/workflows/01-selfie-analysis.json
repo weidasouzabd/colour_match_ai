@@ -1,0 +1,169 @@
+{
+  "name": "01 - Selfie Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "selfie-analysis",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-selfie",
+      "name": "Webhook Selfie",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "selfie-analysis"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body ?? $json;\nreturn [{ json: {\n  store_id: body.store_id,\n  source_channel: body.source_channel ?? 'whatsapp',\n  image_url: body.image_url,\n  customer: {\n    full_name: body.customer?.full_name ?? 'Cliente sem nome',\n    phone: body.customer?.phone ?? null,\n    email: body.customer?.email ?? null\n  },\n  prompt: `Analise esta selfie para coloração pessoal e responda exclusivamente em JSON com as chaves: undertone, depth, contrast_level, season, best_colors, avoid_colors, metals, hair_suggestions, style_notes, confidence_score. Descreva em português do Brasil. Se estiver incerto, mantenha confidence_score abaixo de 0.8.`\n}}];"
+      },
+      "id": "normalize-input",
+      "name": "Normalize Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.OPENAI_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"{{$env.OPENAI_MODEL || 'gpt-4.1-mini'}}\",\n  \"input\": [{\n    \"role\": \"user\",\n    \"content\": [\n      {\"type\": \"input_text\", \"text\": $json.prompt},\n      {\"type\": \"input_image\", \"image_url\": $json.image_url}\n    ]\n  }],\n  \"text\": {\n    \"format\": {\n      \"type\": \"json_schema\",\n      \"name\": \"personal_color_analysis\",\n      \"schema\": {\n        \"type\": \"object\",\n        \"additionalProperties\": false,\n        \"properties\": {\n          \"undertone\": {\"type\": \"string\"},\n          \"depth\": {\"type\": \"string\"},\n          \"contrast_level\": {\"type\": \"string\"},\n          \"season\": {\"type\": \"string\"},\n          \"best_colors\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}},\n          \"avoid_colors\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}},\n          \"metals\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}},\n          \"hair_suggestions\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}},\n          \"style_notes\": {\"type\": \"string\"},\n          \"confidence_score\": {\"type\": \"number\"}\n        },\n        \"required\": [\"undertone\",\"depth\",\"contrast_level\",\"season\",\"best_colors\",\"avoid_colors\",\"metals\",\"hair_suggestions\",\"style_notes\",\"confidence_score\"]\n      }\n    }\n  }\n}"
+      },
+      "id": "openai-analysis",
+      "name": "OpenAI Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [740, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Normalize Input').first().json;\nconst content = $json.output?.[0]?.content?.[0]?.text ?? '{}';\nconst parsed = typeof content === 'string' ? JSON.parse(content) : content;\nreturn [{ json: { ...input, analysis: parsed } }];"
+      },
+      "id": "parse-analysis",
+      "name": "Parse Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [990, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/customers?on_conflict=store_id,phone",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "Prefer", "value": "resolution=merge-duplicates,return=representation"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { store_id: $json.store_id, full_name: $json.customer.full_name, phone: $json.customer.phone, email: $json.customer.email, source_channel: $json.source_channel, last_interaction_at: new Date().toISOString() } }}"
+      },
+      "id": "upsert-customer",
+      "name": "Upsert Customer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('Parse Analysis').first().json;\nconst customerRow = Array.isArray($json) ? $json[0] : $json[0] ?? $json;\nreturn [{ json: { ...base, customer_id: customerRow.id } }];"
+      },
+      "id": "bind-customer-id",
+      "name": "Bind Customer ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1490, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/analyses",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "Prefer", "value": "return=representation"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { store_id: $json.store_id, customer_id: $json.customer_id, selfie_url: $json.image_url, undertone: $json.analysis.undertone, depth: $json.analysis.depth, contrast_level: $json.analysis.contrast_level, season: $json.analysis.season, best_colors: $json.analysis.best_colors, avoid_colors: $json.analysis.avoid_colors, metals: $json.analysis.metals, hair_suggestions: $json.analysis.hair_suggestions, style_notes: $json.analysis.style_notes, confidence_score: $json.analysis.confidence_score, raw_report: $json.analysis } }}"
+      },
+      "id": "insert-analysis",
+      "name": "Insert Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1730, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/message_logs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Content-Type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { store_id: $json.store_id, customer_id: $json.customer_id, channel: $json.source_channel, direction: 'outbound', provider: $env.WHATSAPP_PROVIDER || 'evolution', content: `Sua cartela identificada foi ${$json.analysis.season}. Melhores cores: ${($json.analysis.best_colors || []).join(', ')}.`, metadata: $json.analysis } }}"
+      },
+      "id": "insert-message-log",
+      "name": "Insert Message Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1980, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, customer_id: $('Bind Customer ID').first().json.customer_id, season: $('Bind Customer ID').first().json.analysis.season, best_colors: $('Bind Customer ID').first().json.analysis.best_colors, message: `Cartela ${$('Bind Customer ID').first().json.analysis.season} identificada com sucesso.` } }}",
+        "options": {}
+      },
+      "id": "response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2230, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Selfie": {"main": [[{"node": "Normalize Input", "type": "main", "index": 0}]]},
+    "Normalize Input": {"main": [[{"node": "OpenAI Analysis", "type": "main", "index": 0}]]},
+    "OpenAI Analysis": {"main": [[{"node": "Parse Analysis", "type": "main", "index": 0}]]},
+    "Parse Analysis": {"main": [[{"node": "Upsert Customer", "type": "main", "index": 0}]]},
+    "Upsert Customer": {"main": [[{"node": "Bind Customer ID", "type": "main", "index": 0}]]},
+    "Bind Customer ID": {"main": [[{"node": "Insert Analysis", "type": "main", "index": 0}]]},
+    "Insert Analysis": {"main": [[{"node": "Insert Message Log", "type": "main", "index": 0}]]},
+    "Insert Message Log": {"main": [[{"node": "Webhook Response", "type": "main", "index": 0}]]}
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1"
+}

@@ -1,0 +1,131 @@
+{
+  "name": "04 - Evolution Inbound Router",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "evolution-inbound",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-evolution",
+      "name": "Webhook Evolution",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [180, 260],
+      "webhookId": "evolution-inbound"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body ?? $json;\nconst instance = body.instance || body.instanceName || body.apikey || null;\nconst phone = body.data?.key?.remoteJid?.replace(/@.*/, '') || body.data?.from || body.phone || null;\nconst text = body.data?.message?.conversation || body.data?.body || body.text || '';\nconst imageUrl = body.data?.message?.imageMessage?.url || body.image_url || null;\nreturn [{ json: { instance_name: instance, phone, text, image_url: imageUrl, raw: body } }];"
+      },
+      "id": "normalize-evolution",
+      "name": "Normalize Evolution",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 260]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/whatsapp_instances?instance_name=eq.{{$json.instance_name}}&select=store_id,provider,instance_name&limit=1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}"}
+          ]
+        }
+      },
+      "id": "resolve-tenant",
+      "name": "Resolve Tenant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [670, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "const tenant = Array.isArray($json) ? $json[0] : $json[0] ?? $json;\nconst base = $('Normalize Evolution').first().json;\nif (!tenant?.store_id) throw new Error('Tenant não encontrado para a instância Evolution');\nconst isSelfie = !!base.image_url || /selfie|foto|cartela|coloração/i.test(base.text);\nreturn [{ json: { ...base, store_id: tenant.store_id, route: isSelfie ? 'selfie-analysis' : 'inbox-log' } }];"
+      },
+      "id": "route-decision",
+      "name": "Route Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 260]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2},
+          "conditions": [
+            {"leftValue": "={{$json.route}}", "rightValue": "selfie-analysis", "operator": {"type": "string", "operation": "equals"}}
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-selfie",
+      "name": "If Selfie",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1160, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.WEBHOOK_URL}}webhook/selfie-analysis",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { store_id: $json.store_id, source_channel: 'whatsapp', image_url: $json.image_url, customer: { phone: $json.phone, full_name: 'Lead WhatsApp' } } }}"
+      },
+      "id": "forward-selfie",
+      "name": "Forward Selfie",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1410, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/message_logs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Content-Type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { store_id: $json.store_id, channel: 'whatsapp', direction: 'inbound', provider: 'evolution', content: $json.text || 'Mensagem recebida', metadata: $json.raw } }}"
+      },
+      "id": "log-inbox",
+      "name": "Log Inbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1410, 340]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, route: $('Route Decision').first().json.route } }}"
+      },
+      "id": "evolution-response",
+      "name": "Evolution Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1660, 260]
+    }
+  ],
+  "connections": {
+    "Webhook Evolution": {"main": [[{"node": "Normalize Evolution", "type": "main", "index": 0}]]},
+    "Normalize Evolution": {"main": [[{"node": "Resolve Tenant", "type": "main", "index": 0}]]},
+    "Resolve Tenant": {"main": [[{"node": "Route Decision", "type": "main", "index": 0}]]},
+    "Route Decision": {"main": [[{"node": "If Selfie", "type": "main", "index": 0}]]},
+    "If Selfie": {"main": [[{"node": "Forward Selfie", "type": "main", "index": 0}], [{"node": "Log Inbox", "type": "main", "index": 0}]]},
+    "Forward Selfie": {"main": [[{"node": "Evolution Response", "type": "main", "index": 0}]]},
+    "Log Inbox": {"main": [[{"node": "Evolution Response", "type": "main", "index": 0}]]}
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1"
+}

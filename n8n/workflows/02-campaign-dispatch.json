@@ -1,0 +1,187 @@
+{
+  "name": "02 - Campaign Dispatch",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "campanha-disparo",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-campaign",
+      "name": "Webhook Campaign",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [180, 260],
+      "webhookId": "campanha-disparo"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body ?? $json;\nif (!body.campaign_id) throw new Error('campaign_id é obrigatório');\nreturn [{ json: { campaign_id: body.campaign_id } }];"
+      },
+      "id": "normalize-campaign",
+      "name": "Normalize Campaign",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [430, 260]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/campaigns?id=eq.{{$json.campaign_id}}&select=*",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}"}
+          ]
+        }
+      },
+      "id": "get-campaign",
+      "name": "Get Campaign",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "const campaign = Array.isArray($json) ? $json[0] : $json[0] ?? $json;\nif (!campaign) throw new Error('Campanha não encontrada');\nconst seasonFilter = (campaign.target_seasons || []).map((season) => `season.eq.${season}`).join(',');\nreturn [{ json: { campaign } }];"
+      },
+      "id": "prepare-query",
+      "name": "Prepare Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [930, 260]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/customers?store_id=eq.{{$json.campaign.store_id}}&select=id,full_name,phone,style_profile,analyses!inner(season)&order=created_at.desc",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}"}
+          ]
+        }
+      },
+      "id": "get-customers",
+      "name": "Get Customers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "const campaign = $('Prepare Query').first().json.campaign;\nconst rows = Array.isArray($json) ? $json : [];\nconst targetSeasons = campaign.target_seasons || [];\nconst targetStyles = campaign.target_styles || [];\nreturn rows.filter((row) => {\n  const analysisSeason = row.analyses?.[0]?.season;\n  const seasonOk = !targetSeasons.length || targetSeasons.includes(analysisSeason);\n  const styleOk = !targetStyles.length || targetStyles.includes(row.style_profile);\n  return seasonOk && styleOk && row.phone;\n}).map((row) => ({ json: { campaign, customer: row, message: campaign.message_template.replaceAll('{{nome}}', row.full_name).replaceAll('{{cartela}}', row.analyses?.[0]?.season || 'sua cartela') } }));"
+      },
+      "id": "filter-targets",
+      "name": "Filter Targets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1430, 260]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "split-targets",
+      "name": "Split Targets",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1670, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EVOLUTION_API_URL}}/message/sendText/{{$env.EVOLUTION_INSTANCE_NAME}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "apikey", "value": "={{$env.EVOLUTION_API_KEY}}"},
+            {"name": "Content-Type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { number: $json.customer.phone, text: $json.message } }}"
+      },
+      "id": "send-whatsapp",
+      "name": "Send WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1910, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/campaign_recipients",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "Prefer", "value": "return=minimal"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { campaign_id: $json.campaign.id, customer_id: $json.customer.id, phone: $json.customer.phone, delivery_status: 'sent', sent_at: new Date().toISOString(), response_payload: $json } }}"
+      },
+      "id": "save-recipient",
+      "name": "Save Recipient",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2150, 260]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{$env.SUPABASE_URL}}/rest/v1/campaigns?id=eq.{{$('Prepare Query').first().json.campaign.id}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "apikey", "value": "={{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Authorization", "value": "=Bearer {{$env.SUPABASE_SERVICE_ROLE_KEY}}"},
+            {"name": "Content-Type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"status\":\"sent\",\"launched_at\":\"{{$now}}\"}"
+      },
+      "id": "mark-campaign",
+      "name": "Mark Campaign Sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2390, 260]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, campaign_id: $('Prepare Query').first().json.campaign.id, status: 'sent' } }}"
+      },
+      "id": "campaign-response",
+      "name": "Campaign Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2620, 260]
+    }
+  ],
+  "connections": {
+    "Webhook Campaign": {"main": [[{"node": "Normalize Campaign", "type": "main", "index": 0}]]},
+    "Normalize Campaign": {"main": [[{"node": "Get Campaign", "type": "main", "index": 0}]]},
+    "Get Campaign": {"main": [[{"node": "Prepare Query", "type": "main", "index": 0}]]},
+    "Prepare Query": {"main": [[{"node": "Get Customers", "type": "main", "index": 0}]]},
+    "Get Customers": {"main": [[{"node": "Filter Targets", "type": "main", "index": 0}]]},
+    "Filter Targets": {"main": [[{"node": "Split Targets", "type": "main", "index": 0}]]},
+    "Split Targets": {"main": [[{"node": "Send WhatsApp", "type": "main", "index": 0}], [{"node": "Campaign Response", "type": "main", "index": 0}]]},
+    "Send WhatsApp": {"main": [[{"node": "Save Recipient", "type": "main", "index": 0}]]},
+    "Save Recipient": {"main": [[{"node": "Mark Campaign Sent", "type": "main", "index": 0}]]},
+    "Mark Campaign Sent": {"main": [[{"node": "Split Targets", "type": "main", "index": 1}]]}
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1"
+}
