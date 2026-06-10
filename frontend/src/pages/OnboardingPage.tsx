@@ -20,18 +20,31 @@ export function OnboardingPage({ userId, onDone }: Props) {
     setError(null);
 
     try {
-      // 1. Insert store WITHOUT select - just get the response
+      console.log('=== Starting Onboarding ===');
+      console.log('User ID:', userId);
+
+      // 1. Insert store
+      console.log('Step 1: Inserting store...');
       const { data: store, error: storeError } = await supabase
         .from('stores')
         .insert({ name: storeName, whatsapp_number: whatsapp, niche })
         .select();
 
-      if (storeError) throw storeError;
-      if (!store || store.length === 0) throw new Error('Failed to create store');
+      console.log('Store response:', { store, storeError });
+
+      if (storeError) {
+        console.error('Store error:', storeError);
+        throw storeError;
+      }
+      if (!store || store.length === 0) {
+        throw new Error('Failed to create store - empty response');
+      }
 
       const storeId = store[0].id;
+      console.log('Store created with ID:', storeId);
 
-      // 2. Create profile with the store_id
+      // 2. Create profile
+      console.log('Step 2: Creating profile...');
       const { error: profileError } = await supabase.from('profiles').insert({
         id: userId,
         store_id: storeId,
@@ -39,9 +52,17 @@ export function OnboardingPage({ userId, onDone }: Props) {
         role: 'admin',
       });
 
-      if (profileError) throw profileError;
+      console.log('Profile response:', { profileError });
+
+      if (profileError) {
+        console.error('Profile error:', profileError);
+        throw profileError;
+      }
+
+      console.log('Profile created');
 
       // 3. Create tenant_settings
+      console.log('Step 3: Creating tenant_settings...');
       const slug = storeName.toLowerCase().replace(/\s+/g, '-');
       const { error: settingsError } = await supabase.from('tenant_settings').insert({
         store_id: storeId,
@@ -50,12 +71,21 @@ export function OnboardingPage({ userId, onDone }: Props) {
         onboarding_completed: true,
       });
 
-      if (settingsError) throw settingsError;
+      console.log('Tenant settings response:', { settingsError });
 
+      if (settingsError) {
+        console.error('Settings error:', settingsError);
+        throw settingsError;
+      }
+
+      console.log('Tenant settings created');
+
+      console.log('=== Onboarding completed successfully ===');
       await onDone();
     } catch (err) {
-      console.error('Onboarding error:', err);
-      setError(err instanceof Error ? err.message : 'Falha ao salvar onboarding.');
+      console.error('=== Onboarding error ===', err);
+      const message = err instanceof Error ? err.message : 'Falha ao salvar onboarding.';
+      setError(message);
     } finally {
       setLoading(false);
     }
