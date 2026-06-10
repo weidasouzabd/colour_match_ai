@@ -20,24 +20,41 @@ export function OnboardingPage({ userId, onDone }: Props) {
     setError(null);
 
     try {
+      // 1. Insert store WITHOUT select - just get the response
       const { data: store, error: storeError } = await supabase
         .from('stores')
         .insert({ name: storeName, whatsapp_number: whatsapp, niche })
-        .select('*')
-        .single();
+        .select();
 
       if (storeError) throw storeError;
+      if (!store || store.length === 0) throw new Error('Failed to create store');
 
+      const storeId = store[0].id;
+
+      // 2. Create profile with the store_id
       const { error: profileError } = await supabase.from('profiles').insert({
         id: userId,
-        store_id: store.id,
+        store_id: storeId,
         full_name: fullName,
         role: 'admin',
       });
 
       if (profileError) throw profileError;
+
+      // 3. Create tenant_settings
+      const slug = storeName.toLowerCase().replace(/\s+/g, '-');
+      const { error: settingsError } = await supabase.from('tenant_settings').insert({
+        store_id: storeId,
+        slug: slug,
+        brand_name: storeName,
+        onboarding_completed: true,
+      });
+
+      if (settingsError) throw settingsError;
+
       await onDone();
     } catch (err) {
+      console.error('Onboarding error:', err);
       setError(err instanceof Error ? err.message : 'Falha ao salvar onboarding.');
     } finally {
       setLoading(false);
