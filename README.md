@@ -1,6 +1,6 @@
 # Color Sales AI — SaaS Multitenant Premium
 
-Versão SaaS premium do sistema inteligente de vendas por coloração pessoal.
+Versão SaaS premium do sistema inteligente de vendas por coloração pessoal!
 
 ## Esta versão adiciona
 
