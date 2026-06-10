@@ -48,7 +48,7 @@ Versão SaaS premium do sistema inteligente de vendas por coloração pessoal.
 4. Publicar frontend na Vercel
 5. Importar workflows no n8n
 6. Configurar webhooks da Evolution
-7. Testar onboarding, selfie e campanhas
+7. Testar onboarding, selfie e campanhas?
 
 ## Frontend
 
